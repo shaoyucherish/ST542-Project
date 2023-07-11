@@ -1,0 +1,405 @@
+---
+title: "ST542 - Project"
+author: "Shaoyu Wang"
+subtitle: The Impacts of Federal Reserve’s interest rate on the housing market and
+  various industrial production sectors.
+output:
+  html_document:
+    df_print: paged
+  toc: yes
+  pdf_document: null
+indent: yes
+number_sections: yes
+header-includes:
+- \usepackage{setspace}\onehalfspacing
+- \usepackage{indentfirst}
+df_print: default
+urlcolor: blue
+geometry: margin=1in
+fontsize: 12pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+#Load the Libraries
+library(tidyverse)
+library(caret)
+library(ggplot2)
+
+library(forecast)
+library(lmtest)
+library(scales)
+
+#Set the seed
+set.seed(111)
+```
+
+
+```{r, echo=FALSE, results='hide'}
+
+#Load all of our datasets
+
+#Federal Effective Rate
+datFedFunds <- read_csv('FEDFUNDS.csv')
+
+#30 Year Mortgage Rates
+datMortgage30 <- read_csv('Mortgage30US.csv')
+
+#Housing Unit Information
+datHousingUnits <- read_csv('HOUST1F.csv')
+
+#Mining (Except Oil and Gas) Industrial Data
+datMining <- read_csv('IPG212S.csv')
+
+#Textile Product Mills Industrial Data
+datTextile <- read_csv('IPG314S.csv')
+
+#Wood Products Industrial Data
+datWood  <- read_csv('IPG321S.csv')
+
+#Nonmetallic Mineral Product Industrial Data
+datNonmetallic  <- read_csv('IPG327S.csv')
+
+#Fabricated Metal Product Industrial Data
+datFabricatedMetal  <- read_csv('IPG332S.csv')
+
+#Machinery Industrial Data
+datMachinery  <- read_csv('IPG333S.csv')
+
+#Electrical Equipment Appliance and Component Industrial Data
+datElectricalEquip  <- read_csv('IPG335S.csv')
+
+#Furniture and Related Product Industrial Data
+datFurniture  <- read_csv('IPG337S.csv')
+```
+
+
+```{r, echo=FALSE}
+#Create a list of all of our data sets
+df_List <- list(datFedFunds,datMortgage30,datHousingUnits,datMining,datTextile,
+                datWood,datNonmetallic,datFabricatedMetal,datMachinery,
+                datElectricalEquip,datFurniture)
+
+#Combine the data sets into one single data frame and filter down to the last 5 years only
+df_Combined <- df_List %>% 
+  reduce(full_join,by="DATE") %>% 
+  filter(DATE >= '2018-01-01' & DATE < '2023-01-01')
+  #filter(DATE >= '2020-07-01' & DATE < '2023-01-01')
+  
+#Filter Remove the covid months
+df_Combined <- subset(df_Combined, DATE != '2020-03-01')
+df_Combined <- subset(df_Combined, DATE != '2020-04-01')
+df_Combined <- subset(df_Combined, DATE != '2020-05-01')
+df_Combined <- subset(df_Combined, DATE != '2020-06-01')
+df_Combined <- subset(df_Combined, DATE != '2020-07-01')
+df_Combined <- subset(df_Combined, DATE != '2020-08-01')
+df_Combined <- subset(df_Combined, DATE != '2020-09-01')
+df_Combined <- subset(df_Combined, DATE != '2020-10-01')
+df_Combined <- subset(df_Combined, DATE != '2020-11-01')
+df_Combined <- subset(df_Combined, DATE != '2020-12-01')
+
+#Create Pandemic Month Indicator Variable
+#df_Combined <- df_Combined %>% mutate(PandemicMonth = 0, .after = DATE)
+#df_Combined$PandemicMonth[df_Combined$DATE >= '2020-03-01' &  df_Combined$DATE <= '2020-12-01'] = 1
+
+#Rename Data Columns
+df_Combined <-rename(df_Combined,"FederalRates"=FEDFUNDS,"MortgageRates"=MORTGAGE30US,
+                     "HousingFunds"=HOUST1F,"Mining"=IPG212S,"Textile"=IPG314S,
+                     "Wood"=IPG321S,"NonmetallicMetal"=IPG327S,"FabricatedMetal"=IPG332S,
+                     "Machinery"=IPG333S,"ElectricalEquipment"=IPG335S,"Furniture"=IPG337S)
+
+df_Combined
+```
+
+```{r}
+#Create a separate data frame with just the Federal Rates for future predictions
+df_FedFundsFuture <- datFedFunds %>% select(DATE,FEDFUNDS) %>% filter(DATE > '2022-12-01')
+df_FedFundsFuture <-rename(df_FedFundsFuture,"FederalRates"=FEDFUNDS)
+df_FedFundsFuture
+```
+
+
+```{r, echo=FALSE}
+#Pivot data frame to long format
+
+#Exclude The Pandemic Month Variable if used
+df_CombinedLong <- df_Combined %>%
+  pivot_longer(!DATE, names_to = "Type", values_to = "Value")
+#df_CombinedLong <- select(df_Combined, -PandemicMonth) %>%
+#  pivot_longer(!DATE, names_to = "Type", values_to = "Value")
+
+#Log Transformation of the values?
+df_CombinedLong <- df_CombinedLong %>% mutate(ValueTrans=log2(Value)) 
+
+head(df_CombinedLong)
+```
+
+Show the relationship between the Federal Target Rate the the 30 Year Mortgage Rates
+
+```{r}
+#Filter down to Federal Fund and the 30 year mortgage
+df_Fed_Mort <- df_CombinedLong %>% 
+  filter(Type=="FederalRates"|Type=="MortgageRates")
+
+g <- ggplot(df_Fed_Mort, aes(x=DATE,y=Value))
+  g + geom_line(aes(color=Type,linetype=Type)) + 
+  scale_color_manual(values=c("darkred","steelblue")) +
+  xlab("") + 
+  scale_x_date(date_breaks="3 months",date_labels = "%b %Y") +
+  theme(axis.text.x=element_text(angle=45,vjust=1,hjust=1))
+```
+
+
+```{r}
+#Filter down to Federal Fund and the 30 year mortgage
+df_Fed_Housing <- df_CombinedLong %>% 
+  filter(Type=="FederalRates"|Type=="HousingFunds")
+
+g <- ggplot(df_Fed_Housing, aes(x=DATE,y=ValueTrans))
+  g + geom_line(aes(color=Type,linetype=Type)) + 
+  scale_color_manual(values=c("darkred","steelblue")) +
+  xlab("") + 
+  scale_x_date(date_breaks="3 months",date_labels = "%b %Y") +
+  theme(axis.text.x=element_text(angle=45,vjust=1,hjust=1))
+```
+
+Housing Funds by itself. Notice the steep decline during the same time period as the federal and mortgage rates increase.
+
+```{r}
+#Filter down to the main industrial components
+df_Housing <- df_CombinedLong %>% 
+  filter(Type=="HousingFunds")
+
+g <- ggplot(df_Housing, aes(x=DATE,y=ValueTrans))
+  g + geom_line(aes(color=Type,linetype=Type)) + 
+  xlab("") + 
+  scale_x_date(date_breaks="3 months",date_labels = "%b %Y") +
+  theme(axis.text.x=element_text(angle=45,vjust=1,hjust=1))
+```
+
+
+Relationship between the remaining industrial sectors
+
+```{r}
+#Filter down to the main industrial components
+df_others <- df_CombinedLong %>% 
+  filter(Type!="FederalRates",Type!="MortgageRates",Type!="HousingFunds")
+
+g <- ggplot(df_others, aes(x=DATE,y=ValueTrans))
+  g + geom_line(aes(color=Type,linetype=Type)) + 
+  xlab("") + 
+  scale_x_date(date_breaks="3 months",date_labels = "%b %Y") +
+  theme(axis.text.x=element_text(angle=45,vjust=1,hjust=1))
+```
+
+
+```{r, echo=FALSE, out.height= "80%", out.width="80%"}
+#Make boxplots of all variables
+boxplot <- ggplot(df_others, aes(x=Type, y=ValueTrans)) +
+    geom_boxplot() + 
+    ggtitle('Boxplot of variables') +
+    theme(axis.text.x=element_text(angle=45,vjust=1,hjust=1))
+boxplot
+```
+
+Create a correlation matrix
+
+```{r, echo=FALSE, out.height= "80%", out.width="80%"}
+#Calculate correlation matrix
+#Exclude DATE and Pandemic Month fields
+res<-cor(df_Combined[2:ncol(df_Combined)])
+#Exclude DATE and Pandemic Month fields
+#res<-cor(df_Combined[3:ncol(df_Combined)])
+
+#Make correlation heat maps
+library(corrplot)
+corrplot(res, method="pie", type = "upper", order = "hclust", tl.col = "black", tl.srt = 45)
+```
+
+```{r}
+# plot ACFs
+par(mar=c(5,4,4,2))
+acf(df_Combined$FederalRates, lag.max=10, main="Federal Rates")
+acf(df_Combined$MortgageRates, lag.max=10, main="Mortgage Rates")
+acf(df_Combined$HousingFunds, lag.max=10, main="Housing Funds")
+```
+
+```{r}
+# the remaining industrial sectors
+par(mar=c(5,4,4,2))
+acf(df_Combined$Mining, lag.max=10, main='Mining')
+acf(df_Combined$Textile, lag.max=10, main='Textile')
+acf(df_Combined$Wood, lag.max=10, main='Wood')
+acf(df_Combined$NonmetallicMetal, lag.max=10, main='Nonmetallic Metal')
+acf(df_Combined$FabricatedMetal, lag.max=10, main='Fabricated Metal')
+acf(df_Combined$Machinery, lag.max=10, main='Machinery')
+acf(df_Combined$ElectricalEquipment, lag.max=10, main='Electrical Equipment')
+acf(df_Combined$Furniture, lag.max=10, main='Furniture')
+```
+
+```{r}
+# plot CCFs
+par(mar=c(5,4,4,2))
+ccf(df_Combined$FederalRates, df_Combined$MortgageRates, lag.max=10, main="Federal Rates & Mortgage Rates")
+ccf(df_Combined$FederalRates, df_Combined$HousingFunds, lag.max=10, main="Federal Rates & Housing Funds")
+ccf(df_Combined$FederalRates, df_Combined$Mining, lag.max=10, main="Federal Rates & Mining")
+ccf(df_Combined$FederalRates, df_Combined$Textile, lag.max=10, main="Federal Rates & Textile")
+ccf(df_Combined$FederalRates, df_Combined$Wood, lag.max=10, main="Federal Rates & Wood")
+ccf(df_Combined$FederalRates, df_Combined$NonmetallicMetal, lag.max=10, main="Federal Rates & Nonmetallic Metal")
+ccf(df_Combined$FederalRates, df_Combined$FabricatedMetal, lag.max=10, main="Federal Rates & Fabricated Metal")
+ccf(df_Combined$FederalRates, df_Combined$Machinery, lag.max=10, main="Federal Rates & Machinery")
+ccf(df_Combined$FederalRates, df_Combined$ElectricalEquipment, lag.max=10, main="Federal Rates & Electrical Equipment")
+ccf(df_Combined$FederalRates, df_Combined$Furniture, lag.max=10, main="Federal Rates & Furniture")
+```
+
+```{r}
+XMatrixPast<-cbind(df_Combined$FederalRates)
+#XMatrixPast<-cbind(df_Combined$FederalRates,df_Combined$PandemicMonth)
+colnames(XMatrixPast) <- "FederalRates"
+#colnames(XMatrixPast) <- c("FederalRates","PandemicMonth")
+#XMatrixPast
+
+XMatrixFuture<-cbind(df_FedFundsFuture$FederalRates)
+#XMatrixFuture<-cbind(df_FedFundsFuture$FederalRates,0)
+colnames(XMatrixFuture) <- "FederalRates"
+#colnames(XMatrixFuture) <- c("FederalRates","PandemicMonth")
+XMatrixFuture
+```
+
+
+```{r}
+#What would happen if the fed would raise their rates by 0.25 points?
+XMatrixFuturePlus25=XMatrixFuture
+XMatrixFuturePlus25[,1] = XMatrixFuturePlus25+.25
+XMatrixFuturePlus25
+```
+
+```{r}
+#What would happen if the fed would raise their rates by a full point?
+XMatrixFuturePlus100=XMatrixFuture
+XMatrixFuturePlus100[,1] = XMatrixFuturePlus100+1
+XMatrixFuturePlus100
+```
+
+```{r}
+# # Fitting model using auto arima model - Multivariage Example
+#Set the industrial sector as the response (y) and Mortgage Rates as the predictor (x)
+
+fitMining <- auto.arima(y=df_Combined$Mining,seasonal=FALSE,xreg=XMatrixPast)
+fitTextiles <- auto.arima(y=df_Combined$Textile,seasonal=FALSE,xreg=XMatrixPast)
+fitWood <- auto.arima(y=df_Combined$Wood,seasonal=FALSE,xreg=XMatrixPast)
+fitNonmetallicMetal <- auto.arima(y=df_Combined$NonmetallicMetal,seasonal=FALSE,xreg=XMatrixPast)
+fitFabricatedMetal <- auto.arima(y=df_Combined$FabricatedMetal,seasonal=FALSE,xreg=XMatrixPast)
+fitMachinery <- auto.arima(y=df_Combined$Machinery,seasonal=FALSE,xreg=XMatrixPast)
+fitElectricalEquipment <- auto.arima(y=df_Combined$ElectricalEquipment,seasonal=FALSE,xreg=XMatrixPast)
+fitFurniture <- auto.arima(y=df_Combined$Furniture,seasonal=FALSE,xreg=XMatrixPast)
+
+summary(fitTextiles)
+#Here according to our auto.regression model, the best ARIMA model for textiles is a (0,1,0) model - explanation. . . 
+```
+
+
+```{r}
+# Predictions without a rate change
+#h = number of levels to forecast - here we do the next 6 months
+forecastedValuesMining <- forecast(fitMining, h=6, x=XMatrixFuture)
+forecastedValuesTextiles <- forecast(fitTextiles, h=6, x=XMatrixFuture)
+forecastedValuesWood <- forecast(fitWood, h=6, x=XMatrixFuture)
+forecastedValuesNonmetallicMetal <- forecast(fitNonmetallicMetal, h=6, x=XMatrixFuture)
+forecastedValuesFabricatedMetal <- forecast(fitFabricatedMetal, h=6, x=XMatrixFuture)
+forecastedValuesMachinery <- forecast(fitMachinery, h=6, x=XMatrixFuture)
+forecastedValuesElectricalEquipment <- forecast(fitElectricalEquipment, h=6, x=XMatrixFuture)
+forecastedValuesFurniture <- forecast(fitFurniture, h=6, x=XMatrixFuture)
+
+# Print forecasted values
+#print(forecastedValuesTextiles)
+plot(forecastedValuesTextiles, main = "Textiles Forecast") 
+```
+
+```{r}
+# Predictions with a .25 rate change
+#h = number of levels to forecast - here we do the next 6 months
+forecastedValues25Mining <- forecast(fitMining, h=6, x=XMatrixFuturePlus25)
+forecastedValues25Textiles <- forecast(fitTextiles, h=6, x=XMatrixFuturePlus25)
+forecastedValues25Wood <- forecast(fitWood, h=6, x=XMatrixFuturePlus25)
+forecastedValues25NonmetallicMetal <- forecast(fitNonmetallicMetal, h=6, x=XMatrixFuturePlus25)
+forecastedValues25FabricatedMetal <- forecast(fitFabricatedMetal, h=6, x=XMatrixFuturePlus25)
+forecastedValues25Machinery <- forecast(fitMachinery, h=6, x=XMatrixFuturePlus25)
+forecastedValues25ElectricalEquipment <- forecast(fitElectricalEquipment, h=6, x=XMatrixFuturePlus25)
+forecastedValues25Furniture <- forecast(fitFurniture, h=6, x=XMatrixFuturePlus25)
+
+# Print forecasted values
+#print(forecastedValuesTextiles)
+plot(forecastedValuesTextiles, main = "Textiles Forecast With Fed Rate Increase") 
+```
+
+
+```{r}
+# Predictions with a 1.0 rate change
+#h = number of levels to forecast - here we do the next 6 months
+forecastedValues100Mining <- forecast(fitMining, h=6, x=XMatrixFuturePlus100)
+forecastedValues100Textiles <- forecast(fitTextiles, h=6, x=XMatrixFuturePlus100)
+forecastedValues100Wood <- forecast(fitWood, h=6, x=XMatrixFuturePlus100)
+forecastedValues100NonmetallicMetal <- forecast(fitNonmetallicMetal, h=6, x=XMatrixFuturePlus100)
+forecastedValues100FabricatedMetal <- forecast(fitFabricatedMetal, h=6, x=XMatrixFuturePlus100)
+forecastedValues100Machinery <- forecast(fitMachinery, h=6, x=XMatrixFuturePlus100)
+forecastedValues100ElectricalEquipment <- forecast(fitElectricalEquipment, h=6, x=XMatrixFuturePlus100)
+forecastedValues100Furniture <- forecast(fitFurniture, h=6, x=XMatrixFuturePlus100)
+
+# Print forecasted values
+#print(forecastedValuesTextiles)
+plot(forecastedValuesTextiles, main = "Textiles Forecast With Fed Rate Increase") 
+```
+
+
+```{r}
+#forecastedValuesTextiles$mean[1]
+IndustryType  = c("Mining", "Textiles", "Wood","Nonmetallic Metal","Fabricated Metal","Machinery",
+                  "Electrical Equipment","Furniture")
+
+OriginalForecast = c(forecastedValuesMining$mean[1], forecastedValuesTextiles$mean[1], forecastedValuesWood$mean[1],
+                     forecastedValuesNonmetallicMetal$mean[1], forecastedValuesFabricatedMetal$mean[1],
+                     forecastedValuesMachinery$mean[1], forecastedValuesElectricalEquipment$mean[1],
+                     forecastedValuesFurniture$mean[1])
+
+ForecastWith25Increase = c(forecastedValues25Mining$mean[1], forecastedValues25Textiles$mean[1],
+                           forecastedValues25Wood$mean[1], forecastedValues25NonmetallicMetal$mean[1],
+                           forecastedValues25FabricatedMetal$mean[1],forecastedValues25Machinery$mean[1],
+                           forecastedValues25ElectricalEquipment$mean[1],forecastedValues25Furniture$mean[1])
+
+ForecastWith100Increase = c(forecastedValues100Mining$mean[1], forecastedValues100Textiles$mean[1],
+                           forecastedValues100Wood$mean[1], forecastedValues100NonmetallicMetal$mean[1],
+                           forecastedValues100FabricatedMetal$mean[1],forecastedValues100Machinery$mean[1],
+                           forecastedValues100ElectricalEquipment$mean[1],forecastedValues100Furniture$mean[1])
+
+PercentageChange25Increase = c(
+  percent(forecastedValues25Mining$mean[1]/forecastedValuesMining$mean[1]-1,accuracy=0.01),
+  percent(forecastedValues25Textiles$mean[1]/forecastedValuesTextiles$mean[1]-1,accuracy=0.01),
+  percent(forecastedValues25Wood$mean[1]/forecastedValuesWood$mean[1]-1,accuracy=0.01),
+  percent(forecastedValues25NonmetallicMetal$mean[1]/forecastedValuesNonmetallicMetal$mean[1]-1,accuracy=0.01),
+  percent(forecastedValues25FabricatedMetal$mean[1]/forecastedValuesFabricatedMetal$mean[1]-1,accuracy=0.01),
+  percent(forecastedValues25Machinery$mean[1]/forecastedValuesMachinery$mean[1]-1,accuracy=0.01),
+  percent(forecastedValues25ElectricalEquipment$mean[1]/forecastedValuesElectricalEquipment$mean[1]-1,accuracy=0.01),
+  percent(forecastedValues25Furniture$mean[1]/forecastedValuesFurniture$mean[1]-1,accuracy=0.01)
+  )
+
+PercentageChange100Increase = c(
+  percent(forecastedValues100Mining$mean[1]/forecastedValuesMining$mean[1]-1,accuracy=0.01),
+  percent(forecastedValues100Textiles$mean[1]/forecastedValuesTextiles$mean[1]-1,accuracy=0.01),
+  percent(forecastedValues100Wood$mean[1]/forecastedValuesWood$mean[1]-1,accuracy=0.01),
+  percent(forecastedValues100NonmetallicMetal$mean[1]/forecastedValuesNonmetallicMetal$mean[1]-1,accuracy=0.01),
+  percent(forecastedValues100FabricatedMetal$mean[1]/forecastedValuesFabricatedMetal$mean[1]-1,accuracy=0.01),
+  percent(forecastedValues100Machinery$mean[1]/forecastedValuesMachinery$mean[1]-1,accuracy=0.01),
+percent(forecastedValues100ElectricalEquipment$mean[1]/forecastedValuesElectricalEquipment$mean[1]-1,accuracy=0.01),
+  percent(forecastedValues100Furniture$mean[1]/forecastedValuesFurniture$mean[1]-1,accuracy=0.01)
+  )
+```
+
+```{r}
+df_ForecastedValues <- data.frame(IndustryType,OriginalForecast,ForecastWith25Increase,ForecastWith100Increase,
+                                  PercentageChange25Increase,PercentageChange100Increase)
+df_ForecastedValues
+```
+
+

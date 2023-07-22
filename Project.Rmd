@@ -1,5 +1,5 @@
 ---
-title: "ST542 - Project"
+title: "Time Series Analysis Project"
 author: "Shaoyu Wang"
 subtitle: The Impacts of Federal Reserve’s interest rate on the housing market and
   various industrial production sectors.

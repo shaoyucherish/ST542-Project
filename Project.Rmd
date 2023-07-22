@@ -35,7 +35,6 @@ library(scales)
 set.seed(111)
 ```
 
-
 ```{r, echo=FALSE, results='hide'}
 
 #Load all of our datasets
